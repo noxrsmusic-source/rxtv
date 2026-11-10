@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>R TV + | Live Streaming</title>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+  <style>
+    :root {
+      --bg-color: #0f0f0f;
+      --sidebar-bg: #181818;
+      --card-bg: #212121;
+      --text-main: #ffffff;
+      --text-muted: #aaaaaa;
+      --brand-color: #e50914; /* Netflix style red, aap change kar sakte hain */
+      --hover-bg: #303030;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-main);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* Header */
+    header {
+      background-color: var(--sidebar-bg);
+      padding: 15px 25px;
+      display: flex;
+      align-items: center;
+      border-bottom: 1px solid #333;
+    }
+    .logo {
+      font-size: 24px;
+      font-weight: bold;
+      color: var(--brand-color);
+      letter-spacing: 1px;
+    }
+    .logo span { color: #fff; }
+
+    /* Main Layout */
+    .main-container {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* Sidebar (Channel List) */
+    .sidebar {
+      width: 320px;
+      background-color: var(--sidebar-bg);
+      border-right: 1px solid #333;
+      display: flex;
+      flex-direction: column;
+    }
+    .sidebar h2 {
+      font-size: 14px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      padding: 15px 20px 10px;
+      letter-spacing: 1px;
+    }
+    .channel-list {
+      overflow-y: auto;
+      flex: 1;
+    }
+    .channel-list::-webkit-scrollbar { width: 6px; }
+    .channel-list::-webkit-scrollbar-thumb { background: #555; border-radius: 4px; }
+
+    .channel-item {
+      display: flex;
+      align-items: center;
+      padding: 12px 20px;
+      cursor: pointer;
+      transition: background 0.2s;
+      border-left: 4px solid transparent;
+    }
+    .channel-item:hover { background-color: var(--hover-bg); }
+    .channel-item.active {
+      background-color: #2a2a2a;
+      border-left-color: var(--brand-color);
+    }
+    .channel-icon {
+      width: 40px;
+      height: 40px;
+      background-color: #333;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      margin-right: 15px;
+      color: #fff;
+      font-size: 16px;
+    }
+    .channel-info { flex: 1; }
+    .channel-name { font-size: 15px; font-weight: 500; margin-bottom: 4px;}
+    .channel-cat { font-size: 12px; color: var(--text-muted); }
+
+    /* Player Area */
+    .player-section {
+      flex: 1;
+      background-color: #000;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+    .video-container {
+      flex: 1;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    video {
+      width: 100%;
+      height: 100%;
+      display: block;
+      outline: none;
+    }
+    .placeholder-msg {
+      position: absolute;
+      text-align: center;
+      color: var(--text-muted);
+    }
+    .loading-spinner {
+      position: absolute;
+      width: 40px;
+      height: 40px;
+      border: 4px solid #333;
+      border-top-color: var(--brand-color);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      display: none;
+    }
+    @keyframes spin { 100% { transform: rotate(360deg); } }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .main-container { flex-direction: column-reverse; }
+      .sidebar { width: 100%; height: 40%; border-right: none; border-top: 1px solid #333; }
+      .player-section { height: 60%; }
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="logo">R TV <span>+</span></div>
+  </header>
+
+  <div class="main-container">
+    
+    <!-- Sidebar: Channel List -->
+    <aside class="sidebar">
+      <h2>Live Channels</h2>
+      <div class="channel-list" id="channelList">
+        <!-- Channels will be injected here by JS -->
+      </div>
+    </aside>
+
+    <!-- Main Player Area -->
+    <main class="player-section">
+      <div class="video-container">
+        <div id="playerPlaceholder" class="placeholder-msg">
+          <h2>Select a channel to start watching</h2>
+          <p>Left menu se koi bhi channel click karein.</p>
+        </div>
+        <div id="loading" class="loading-spinner"></div>
+        <video id="video" controls playsinline style="display: none;"></video>
+      </div>
+    </main>
+
+  </div>
+
+  <script>
+    // ==========================================
+    // YAHAN NAYE CHANNELS ADD KAREIN
+    // id: Ottbox/JioTV ki channel ID
+    // name: Channel ka naam
+    // category: (Optional) Category
+    // ==========================================
+    const channels = [
+      { id: '471', name: 'Sony SAB HD', category: 'Entertainment' },
+      { id: '162', name: 'Star Sports 1 HD', category: 'Sports' },
+      { id: '144', name: 'Colors HD', category: 'Entertainment' },
+      { id: '165', name: 'Zee Cinema HD', category: 'Movies' },
+      { id: '173', name: 'Aaj Tak', category: 'News' },
+      { id: '476', name: 'Sony Max HD', category: 'Movies' },
+      { id: '155', name: 'Sony Ten 5 HD', category: 'Sports' },
+      { id: '146', name: 'History TV18 HD', category: 'Infotainment' },
+      { id: '474', name: 'Sony Pal', category: 'Infotainment' },
+    ];
+
+    // DOM Elements
+    const channelListEl = document.getElementById('channelList');
+    const videoEl = document.getElementById('video');
+    const placeholderEl = document.getElementById('playerPlaceholder');
+    const loadingEl = document.getElementById('loading');
+    let hls = null;
+
+    // 1. Render Channel List
+    function renderChannels() {
+      channelListEl.innerHTML = '';
+      channels.forEach(ch => {
+        const item = document.createElement('div');
+        item.className = 'channel-item';
+        item.id = `ch-${ch.id}`;
+        
+        // Initials for icon
+        const initials = ch.name.substring(0, 2).toUpperCase();
+
+        item.innerHTML = `
+          <div class="channel-icon">${initials}</div>
+          <div class="channel-info">
+            <div class="channel-name">${ch.name}</div>
+            <div class="channel-cat">${ch.category}</div>
+          </div>
+        `;
+
+        item.onclick = () => playChannel(ch, item);
+        channelListEl.appendChild(item);
+      });
+    }
+
+    // 2. Play Channel Logic
+    function playChannel(channel, itemEl) {
+      // Update UI Active State
+      document.querySelectorAll('.channel-item').forEach(el => el.classList.remove('active'));
+      if (itemEl) itemEl.classList.add('active');
+
+      // Update URL without reloading page (e.g., ?ch=471)
+      const newUrl = new URL(window.location);
+      newUrl.searchParams.set('ch', channel.id);
+      window.history.pushState({}, '', newUrl);
+
+      // UI Reset
+      placeholderEl.style.display = 'none';
+      videoEl.style.display = 'block';
+      loadingEl.style.display = 'block';
+
+      // Destroy old player instance if exists
+      if (hls) {
+        hls.destroy();
+        hls = null;
+      }
+
+      const streamUrl = `/play/${channel.id}`;
+
+      // Play using HLS.js
+      if (Hls.isSupported()) {
+        hls = new Hls({ enableWorker: true, lowLatencyMode: false });
+        hls.loadSource(streamUrl);
+        hls.attachMedia(videoEl);
+
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          loadingEl.style.display = 'none';
+          videoEl.play().catch(() => {});
+        });
+
+        hls.on(Hls.Events.ERROR, (_, data) => {
+          if (!data.fatal) return;
+          loadingEl.style.display = 'none';
+          console.error('HLS Error:', data);
+          alert('Channel load nahi ho paya. Server online hai ya nahi check karein.');
+        });
+      } 
+      // Native Safari support
+      else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+        videoEl.src = streamUrl;
+        loadingEl.style.display = 'none';
+        videoEl.play().catch(() => {});
+      }
+    }
+
+    // 3. On Load Check if URL has channel ID
+    window.onload = () => {
+      renderChannels();
+
+      const urlParams = new URLSearchParams(window.location.search);
+      const chId = urlParams.get('ch');
+
+      if (chId) {
+        const channel = channels.find(c => c.id === chId);
+        if (channel) {
+          const itemEl = document.getElementById(`ch-${chId}`);
+          playChannel(channel, itemEl);
+        }
+      }
+    };
+
+    // Double click for fullscreen
+    videoEl.addEventListener('dblclick', () => {
+      if (videoEl.requestFullscreen) videoEl.requestFullscreen();
+    });
+  </script>
+</body>
+</html>
