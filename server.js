@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import puppeteer from 'puppeteer-core';
-import chromium from '@sparticuz/chromium';
+import chromium from '@sparticuz/chromium-min';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -32,7 +32,7 @@ function toUpstream(pathOrUrl) {
   return UPSTREAM + '/' + pathOrUrl;
 }
 
-// --- HELPER FUNCTION: M3U8 aur Keys (render.key) ko rewrite karne ke liye ---
+// --- HELPER FUNCTION: M3U8 aur Encryption Keys ko rewrite karne ke liye ---
 function rewriteManifest(text, manifestUrl, proxyHostUrl, refererUrl) {
   const base = new URL(manifestUrl);
   const self = `${proxyHostUrl}/seg`;
@@ -77,12 +77,15 @@ app.get('/play/:id', async (req, res) => {
 
   let browser = null;
   try {
-    // Vercel ke liye Chromium launch karein
+    // Vercel ke liye Chromium launch karein (Sparticuz Chromium Min)
     browser = await puppeteer.launch({
       args: chromium.args,
       defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath(),
+      executablePath: await chromium.executablePath(
+        'https://github.com/Sparticuz/chromium/releases/download/v123.0.0/chromium-v123.0.0-pack.tar'
+      ),
       headless: chromium.headless,
+      ignoreHTTPSErrors: true,
     });
     
     const page = await browser.newPage();
@@ -96,8 +99,8 @@ app.get('/play/:id', async (req, res) => {
           resolve(url);
         }
       });
-      // 15 seconds timeout for extraction
-      setTimeout(() => reject(new Error('Timeout: render.m3u8 URL nahi mila')), 15000);
+      // Timeout 20 seconds (Vercel maxDuration ke andar)
+      setTimeout(() => reject(new Error('Timeout: render.m3u8 URL nahi mila')), 20000);
     });
 
     // Player page load karein
@@ -105,7 +108,7 @@ app.get('/play/:id', async (req, res) => {
 
     const resolvedM3u8Url = await m3u8Promise;
     
-    // Kaam khatam, browser band karein
+    // Kaam khatam, browser turant band karein memory bachane ke liye
     await browser.close();
     browser = null;
 
