@@ -2,7 +2,8 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import puppeteer from 'puppeteer-core';
-import chromium from '@sparticuz/chromium-min';
+// 1. Yahan import badla hai
+import chromium from '@sparticuz/chromium';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -77,13 +78,12 @@ app.get('/play/:id', async (req, res) => {
 
   let browser = null;
   try {
-    // Vercel ke liye Chromium launch karein (Sparticuz Chromium Min)
+    // Vercel ke liye Chromium launch karein (Sparticuz Chromium)
     browser = await puppeteer.launch({
       args: chromium.args,
       defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath(
-        'https://github.com/Sparticuz/chromium/releases/download/v123.0.0/chromium-v123.0.0-pack.tar'
-      ),
+      // 2. Yahan executablePath change kiya hai
+      executablePath: await chromium.executablePath(), 
       headless: chromium.headless,
       ignoreHTTPSErrors: true,
     });
