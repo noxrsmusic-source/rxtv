@@ -1,0 +1,14 @@
+{
+  "name": "raktan-tv",
+  "version": "1.0.0",
+  "description": "R TV+ Streaming Proxy",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@sparticuz/chromium": "^123.0.0",
+    "express": "^4.19.2",
+    "puppeteer-core": "^22.0.0"
+  }
+}
