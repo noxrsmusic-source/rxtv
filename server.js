@@ -1,8 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer from 'puppeteer-core';
-import chromium from '@sparticuz/chromium-min';
+import puppeteer from 'puppeteer';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -55,19 +54,10 @@ app.get('/play/:id', async (req, res) => {
   let browser = null;
 
   try {
-    const executablePath = await chromium.executablePath(
-      'https://github.com/Sparticuz/chromium/releases/download/v123.0.0/chromium-v123.0.0-pack.tar'
-    );
-
-    // ✅ Yeh line libnss3.so error fix karti hai
-    process.env.LD_LIBRARY_PATH = path.dirname(executablePath);
-
+    // Docker ke andar Puppeteer seedha system Chromium use karega
     browser = await puppeteer.launch({
-      args: [...chromium.args, '--no-sandbox', '--disable-setuid-sandbox'],
-      defaultViewport: chromium.defaultViewport,
-      executablePath: executablePath,
-      headless: chromium.headless,
-      ignoreHTTPSErrors: true,
+      headless: 'new',
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
     });
     
     const page = await browser.newPage();
@@ -81,17 +71,22 @@ app.get('/play/:id', async (req, res) => {
           resolve(url);
         }
       });
-      setTimeout(() => reject(new Error('Timeout: m3u8 nahi mila')), 25000);
+      setTimeout(() => reject(new Error('Timeout: m3u8 nahi mila')), 30000);
     });
 
-    await page.goto(playerUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+    await page.goto(playerUrl, { waitUntil: 'networkidle2', timeout: 40000 });
     const resolvedM3u8Url = await m3u8Promise;
     
     await browser.close();
     browser = null;
 
     const m3u8Res = await fetch(resolvedM3u8Url, {
-      headers: { 'Referer': playerUrl, 'Origin': UPSTREAM, 'User-Agent': UA, 'Accept': '*/*' },
+      headers: {
+        'Referer': playerUrl,
+        'Origin': UPSTREAM,
+        'User-Agent': UA,
+        'Accept': '*/*',
+      },
     });
 
     if (!m3u8Res.ok) throw new Error(`m3u8 fetch failed: ${m3u8Res.status}`);
@@ -114,12 +109,16 @@ app.get('/play/:id', async (req, res) => {
 app.get('/seg', async (req, res) => {
   const targetUrl = req.query.u;
   const refererUrl = req.query.r || (UPSTREAM + '/');
-
   if (!targetUrl) return res.status(400).send('Missing u=');
 
   try {
     const upstreamRes = await fetch(targetUrl, {
-      headers: { 'Referer': refererUrl, 'Origin': UPSTREAM, 'User-Agent': UA, 'Accept': '*/*' },
+      headers: {
+        'Referer': refererUrl,
+        'Origin': UPSTREAM,
+        'User-Agent': UA,
+        'Accept': '*/*',
+      },
       redirect: 'follow',
     });
 
