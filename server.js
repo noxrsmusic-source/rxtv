@@ -2,7 +2,6 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import puppeteer from 'puppeteer-core';
-// 1. Yahan import badla hai
 import chromium from '@sparticuz/chromium';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -26,13 +25,6 @@ app.use((req, res, next) => {
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Helper: build absolute upstream URL
-function toUpstream(pathOrUrl) {
-  if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl;
-  if (pathOrUrl.startsWith('/')) return UPSTREAM + pathOrUrl;
-  return UPSTREAM + '/' + pathOrUrl;
-}
-
 // --- HELPER FUNCTION: M3U8 aur Encryption Keys ko rewrite karne ke liye ---
 function rewriteManifest(text, manifestUrl, proxyHostUrl, refererUrl) {
   const base = new URL(manifestUrl);
@@ -43,7 +35,6 @@ function rewriteManifest(text, manifestUrl, proxyHostUrl, refererUrl) {
     const s = line.trim();
     if (!s) return line;
 
-    // 1. Encryption Keys (URI="...") ko proxy karein
     if (s.startsWith('#')) {
       if (s.includes('URI="')) {
         return s.replace(/URI="([^"]+)"/g, (match, uri) => {
@@ -63,7 +54,6 @@ function rewriteManifest(text, manifestUrl, proxyHostUrl, refererUrl) {
       return line;
     }
 
-    // 2. Video segments (.ts)
     try {
       const abs = new URL(s, base).href;
       return `${self}?u=${encodeURIComponent(abs)}&r=${refParam}`;
@@ -78,12 +68,13 @@ app.get('/play/:id', async (req, res) => {
 
   let browser = null;
   try {
-    // Vercel ke liye Chromium launch karein (Sparticuz Chromium)
+    // ✅ Vercel ke liye Chromium setup
+    const executablePath = await chromium.executablePath();
+    
     browser = await puppeteer.launch({
       args: chromium.args,
       defaultViewport: chromium.defaultViewport,
-      // 2. Yahan executablePath change kiya hai
-      executablePath: await chromium.executablePath(), 
+      executablePath: executablePath,
       headless: chromium.headless,
       ignoreHTTPSErrors: true,
     });
@@ -99,20 +90,16 @@ app.get('/play/:id', async (req, res) => {
           resolve(url);
         }
       });
-      // Timeout 20 seconds (Vercel maxDuration ke andar)
-      setTimeout(() => reject(new Error('Timeout: render.m3u8 URL nahi mila')), 20000);
+      setTimeout(() => reject(new Error('Timeout: render.m3u8 URL nahi mila')), 25000);
     });
 
-    // Player page load karein
-    await page.goto(playerUrl, { waitUntil: 'networkidle2', timeout: 25000 });
+    await page.goto(playerUrl, { waitUntil: 'networkidle2', timeout: 30000 });
 
     const resolvedM3u8Url = await m3u8Promise;
     
-    // Kaam khatam, browser turant band karein memory bachane ke liye
     await browser.close();
     browser = null;
 
-    // M3U8 file fetch karein
     const m3u8Res = await fetch(resolvedM3u8Url, {
       headers: {
         'Referer': playerUrl,
@@ -128,7 +115,6 @@ app.get('/play/:id', async (req, res) => {
 
     const m3u8Text = await m3u8Res.text();
 
-    // Rewrite Manifest (Video URL + Encryption Keys)
     const proxyHostUrl = `${req.protocol}://${req.get('host')}`;
     const rewritten = rewriteManifest(m3u8Text, resolvedM3u8Url, proxyHostUrl, playerUrl);
 
@@ -167,7 +153,6 @@ app.get('/seg', async (req, res) => {
 
     const ct = (upstreamRes.headers.get('content-type') || '').toLowerCase();
 
-    // Nested M3U8 playlists
     if (ct.includes('mpegurl') || targetUrl.split('?')[0].endsWith('.m3u8')) {
       const text = await upstreamRes.text();
       const proxyHostUrl = `${req.protocol}://${req.get('host')}`;
@@ -178,7 +163,6 @@ app.get('/seg', async (req, res) => {
       return res.send(rewritten);
     }
 
-    // Binary files (.ts, .mp4, render.key)
     res.setHeader('Content-Type', ct || 'application/octet-stream');
     const cl = upstreamRes.headers.get('content-length');
     if (cl) res.setHeader('Content-Length', cl);
