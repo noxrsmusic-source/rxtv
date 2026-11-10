@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import puppeteer from 'puppeteer-core';
-import chromium from '@sparticuz/chromium';
+import chromium from '@sparticuz/chromium-min';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -25,7 +25,7 @@ app.use((req, res, next) => {
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Helper: M3U8 aur Keys ko rewrite karne ke liye
+// Helper: M3U8 aur Encryption Keys ko rewrite karne ke liye
 function rewriteManifest(text, manifestUrl, proxyHostUrl, refererUrl) {
   const base = new URL(manifestUrl);
   const self = `${proxyHostUrl}/seg`;
@@ -50,14 +50,18 @@ function rewriteManifest(text, manifestUrl, proxyHostUrl, refererUrl) {
   }).join('\n');
 }
 
-// --- MAIN PLAY ROUTE ---
+// --- MAIN PLAY ROUTE (Vercel Optimized) ---
 app.get('/play/:id', async (req, res) => {
   const channelId = req.params.id;
   const playerUrl = `${UPSTREAM}/player/${channelId}?q=auto&pm=auto`;
   let browser = null;
 
   try {
-    const executablePath = await chromium.executablePath();
+    // ✅ Vercel ke liye Chromium-min ka use
+    const executablePath = await chromium.executablePath(
+      'https://github.com/Sparticuz/chromium/releases/download/v123.0.0/chromium-v123.0.0-pack.tar'
+    );
+
     browser = await puppeteer.launch({
       args: chromium.args,
       defaultViewport: chromium.defaultViewport,
