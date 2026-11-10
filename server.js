@@ -24,6 +24,7 @@ app.use((req, res, next) => {
 
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Helper: M3U8 aur Encryption Keys ko rewrite karne ke liye
 function rewriteManifest(text, manifestUrl, proxyHostUrl, refererUrl) {
   const base = new URL(manifestUrl);
   const self = `${proxyHostUrl}/seg`;
@@ -48,16 +49,24 @@ function rewriteManifest(text, manifestUrl, proxyHostUrl, refererUrl) {
   }).join('\n');
 }
 
+// --- MAIN PLAY ROUTE ---
 app.get('/play/:id', async (req, res) => {
   const channelId = req.params.id;
   const playerUrl = `${UPSTREAM}/player/${channelId}?q=auto&pm=auto`;
   let browser = null;
 
   try {
-    // Docker ke andar Puppeteer seedha system Chromium use karega
+    // ✅ Render/Docker ke liye optimized Puppeteer launch
     browser = await puppeteer.launch({
       headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--single-process',
+        '--no-zygote'
+      ],
+      protocolTimeout: 120000 // 2 minute max timeout for entire protocol
     });
     
     const page = await browser.newPage();
@@ -71,15 +80,15 @@ app.get('/play/:id', async (req, res) => {
           resolve(url);
         }
       });
-      setTimeout(() => reject(new Error('Timeout: m3u8 nahi mila')), 30000);
+      // ✅ Timeout 60 second (Render cold start ke liye)
+      setTimeout(() => reject(new Error('Timeout: render.m3u8 URL nahi mila')), 60000);
     });
 
-    await page.goto(playerUrl, { waitUntil: 'networkidle2', timeout: 40000 });
+    // ✅ waitUntil 'load' rakhein taaki networkidle par hang na ho
+    await page.goto(playerUrl, { waitUntil: 'load', timeout: 45000 });
     const resolvedM3u8Url = await m3u8Promise;
-    
-    await browser.close();
-    browser = null;
 
+    // M3U8 file fetch karein
     const m3u8Res = await fetch(resolvedM3u8Url, {
       headers: {
         'Referer': playerUrl,
@@ -92,6 +101,7 @@ app.get('/play/:id', async (req, res) => {
     if (!m3u8Res.ok) throw new Error(`m3u8 fetch failed: ${m3u8Res.status}`);
     const m3u8Text = await m3u8Res.text();
 
+    // Rewrite Manifest (Video URL + Encryption Keys)
     const proxyHostUrl = `${req.protocol}://${req.get('host')}`;
     const rewritten = rewriteManifest(m3u8Text, resolvedM3u8Url, proxyHostUrl, playerUrl);
 
@@ -101,11 +111,16 @@ app.get('/play/:id', async (req, res) => {
 
   } catch (err) {
     console.error('[/play] error:', err.message);
-    if (browser) await browser.close();
     res.status(500).json({ error: err.message });
+  } finally {
+    // ✅ Memory leak se bachne ke liye browser hamesha band karein
+    if (browser) {
+      await browser.close().catch(() => {});
+    }
   }
 });
 
+// --- SEGMENT ROUTE (Video chunks & Encryption Keys) ---
 app.get('/seg', async (req, res) => {
   const targetUrl = req.query.u;
   const refererUrl = req.query.r || (UPSTREAM + '/');
@@ -123,8 +138,10 @@ app.get('/seg', async (req, res) => {
     });
 
     if (!upstreamRes.ok) return res.status(upstreamRes.status).send(`Upstream ${upstreamRes.status}`);
+    
     const ct = (upstreamRes.headers.get('content-type') || '').toLowerCase();
 
+    // Agar nested playlist aaye toh use bhi rewrite karein
     if (ct.includes('mpegurl') || targetUrl.split('?')[0].endsWith('.m3u8')) {
       const text = await upstreamRes.text();
       const proxyHostUrl = `${req.protocol}://${req.get('host')}`;
@@ -134,8 +151,11 @@ app.get('/seg', async (req, res) => {
       return res.send(rewritten);
     }
 
+    // Video segments (.ts) aur Encryption Keys
     res.setHeader('Content-Type', ct || 'application/octet-stream');
-    if (upstreamRes.headers.get('content-length')) res.setHeader('Content-Length', upstreamRes.headers.get('content-length'));
+    if (upstreamRes.headers.get('content-length')) {
+      res.setHeader('Content-Length', upstreamRes.headers.get('content-length'));
+    }
     res.setHeader('Cache-Control', 'public, max-age=60');
 
     const reader = upstreamRes.body.getReader();
@@ -146,12 +166,18 @@ app.get('/seg', async (req, res) => {
         res.write(value);
       }
     };
-    pump().catch(() => res.end());
+    pump().catch((err) => {
+      console.error('Stream error:', err);
+      res.end();
+    });
 
   } catch (err) {
+    console.error('[/seg] error:', err);
     if (!res.headersSent) res.status(502).send('Segment fetch failed: ' + err.message);
     else res.end();
   }
 });
 
-app.listen(PORT, () => console.log(`✅ R TV+ running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`✅ R TV+ running on port ${PORT}`);
+});
