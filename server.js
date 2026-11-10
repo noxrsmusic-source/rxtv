@@ -25,7 +25,7 @@ app.use((req, res, next) => {
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// --- HELPER FUNCTION: M3U8 aur Encryption Keys ko rewrite karne ke liye ---
+// Helper: M3U8 aur Keys ko rewrite karne ke liye
 function rewriteManifest(text, manifestUrl, proxyHostUrl, refererUrl) {
   const base = new URL(manifestUrl);
   const self = `${proxyHostUrl}/seg`;
@@ -34,43 +34,30 @@ function rewriteManifest(text, manifestUrl, proxyHostUrl, refererUrl) {
   return text.split('\n').map(line => {
     const s = line.trim();
     if (!s) return line;
-
     if (s.startsWith('#')) {
       if (s.includes('URI="')) {
         return s.replace(/URI="([^"]+)"/g, (match, uri) => {
-          try {
-            const abs = new URL(uri, base).href;
-            return `URI="${self}?u=${encodeURIComponent(abs)}&r=${refParam}"`;
-          } catch { return match; }
+          try { return `URI="${self}?u=${encodeURIComponent(new URL(uri, base).href)}&r=${refParam}"`; } catch { return match; }
         });
       } else if (s.includes('URI=')) {
         return s.replace(/URI=([^,]+)/g, (match, uri) => {
-          try {
-            const abs = new URL(uri, base).href;
-            return `URI="${self}?u=${encodeURIComponent(abs)}&r=${refParam}"`;
-          } catch { return match; }
+          try { return `URI="${self}?u=${encodeURIComponent(new URL(uri, base).href)}&r=${refParam}"`; } catch { return match; }
         });
       }
       return line;
     }
-
-    try {
-      const abs = new URL(s, base).href;
-      return `${self}?u=${encodeURIComponent(abs)}&r=${refParam}`;
-    } catch { return line; }
+    try { return `${self}?u=${encodeURIComponent(new URL(s, base).href)}&r=${refParam}`; } catch { return line; }
   }).join('\n');
 }
 
-// ---------------- MAIN PLAY ROUTE (Vercel Optimized) ----------------
+// --- MAIN PLAY ROUTE ---
 app.get('/play/:id', async (req, res) => {
   const channelId = req.params.id;
   const playerUrl = `${UPSTREAM}/player/${channelId}?q=auto&pm=auto`;
-
   let browser = null;
+
   try {
-    // ✅ Vercel ke liye Chromium setup
     const executablePath = await chromium.executablePath();
-    
     browser = await puppeteer.launch({
       args: chromium.args,
       defaultViewport: chromium.defaultViewport,
@@ -80,8 +67,8 @@ app.get('/play/:id', async (req, res) => {
     });
     
     const page = await browser.newPage();
-
     let m3u8Url = null;
+
     const m3u8Promise = new Promise((resolve, reject) => {
       page.on('request', (request) => {
         const url = request.url();
@@ -90,29 +77,20 @@ app.get('/play/:id', async (req, res) => {
           resolve(url);
         }
       });
-      setTimeout(() => reject(new Error('Timeout: render.m3u8 URL nahi mila')), 25000);
+      setTimeout(() => reject(new Error('Timeout: m3u8 nahi mila')), 25000);
     });
 
     await page.goto(playerUrl, { waitUntil: 'networkidle2', timeout: 30000 });
-
     const resolvedM3u8Url = await m3u8Promise;
     
     await browser.close();
     browser = null;
 
     const m3u8Res = await fetch(resolvedM3u8Url, {
-      headers: {
-        'Referer': playerUrl,
-        'Origin': UPSTREAM,
-        'User-Agent': UA,
-        'Accept': '*/*',
-      },
+      headers: { 'Referer': playerUrl, 'Origin': UPSTREAM, 'User-Agent': UA, 'Accept': '*/*' },
     });
 
-    if (!m3u8Res.ok) {
-      throw new Error(`m3u8 fetch failed: ${m3u8Res.status}`);
-    }
-
+    if (!m3u8Res.ok) throw new Error(`m3u8 fetch failed: ${m3u8Res.status}`);
     const m3u8Text = await m3u8Res.text();
 
     const proxyHostUrl = `${req.protocol}://${req.get('host')}`;
@@ -129,43 +107,32 @@ app.get('/play/:id', async (req, res) => {
   }
 });
 
-// ---------------- SEGMENT ROUTE ----------------
+// --- SEGMENT ROUTE ---
 app.get('/seg', async (req, res) => {
   const targetUrl = req.query.u;
   const refererUrl = req.query.r || (UPSTREAM + '/');
-
   if (!targetUrl) return res.status(400).send('Missing u=');
 
   try {
     const upstreamRes = await fetch(targetUrl, {
-      headers: {
-        'Referer': refererUrl,
-        'Origin': UPSTREAM,
-        'User-Agent': UA,
-        'Accept': '*/*',
-      },
+      headers: { 'Referer': refererUrl, 'Origin': UPSTREAM, 'User-Agent': UA, 'Accept': '*/*' },
       redirect: 'follow',
     });
 
-    if (!upstreamRes.ok) {
-      return res.status(upstreamRes.status).send(`Upstream ${upstreamRes.status}`);
-    }
-
+    if (!upstreamRes.ok) return res.status(upstreamRes.status).send(`Upstream ${upstreamRes.status}`);
     const ct = (upstreamRes.headers.get('content-type') || '').toLowerCase();
 
     if (ct.includes('mpegurl') || targetUrl.split('?')[0].endsWith('.m3u8')) {
       const text = await upstreamRes.text();
       const proxyHostUrl = `${req.protocol}://${req.get('host')}`;
       const rewritten = rewriteManifest(text, upstreamRes.url || targetUrl, proxyHostUrl, refererUrl);
-
       res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
       res.setHeader('Cache-Control', 'no-store');
       return res.send(rewritten);
     }
 
     res.setHeader('Content-Type', ct || 'application/octet-stream');
-    const cl = upstreamRes.headers.get('content-length');
-    if (cl) res.setHeader('Content-Length', cl);
+    if (upstreamRes.headers.get('content-length')) res.setHeader('Content-Length', upstreamRes.headers.get('content-length'));
     res.setHeader('Cache-Control', 'public, max-age=60');
 
     const reader = upstreamRes.body.getReader();
@@ -176,17 +143,12 @@ app.get('/seg', async (req, res) => {
         res.write(value);
       }
     };
-    pump().catch(err => {
-      console.error('[/seg] stream error:', err);
-      res.end();
-    });
+    pump().catch(() => res.end());
+
   } catch (err) {
-    console.error('[/seg] error:', err);
     if (!res.headersSent) res.status(502).send('Segment fetch failed: ' + err.message);
     else res.end();
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`\n✅ R TV+ running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`✅ R TV+ running on port ${PORT}`));
