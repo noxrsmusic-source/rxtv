@@ -6,11 +6,7 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "@sparticuz/chromium-min": "^123.0.0",
     "express": "^4.19.2",
-    "puppeteer-core": "^22.0.0"
-  },
-  "engines": {
-    "node": "22.x"
+    "puppeteer": "^22.0.0"
   }
 }
