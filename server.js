@@ -25,7 +25,6 @@ app.use((req, res, next) => {
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Helper: M3U8 aur Encryption Keys ko proxy karne ke liye
 function rewriteManifest(text, manifestUrl, proxyHostUrl, refererUrl) {
   const base = new URL(manifestUrl);
   const self = `${proxyHostUrl}/seg`;
@@ -50,23 +49,19 @@ function rewriteManifest(text, manifestUrl, proxyHostUrl, refererUrl) {
   }).join('\n');
 }
 
-// --- MAIN PLAY ROUTE (Vercel Optimized) ---
 app.get('/play/:id', async (req, res) => {
   const channelId = req.params.id;
   const playerUrl = `${UPSTREAM}/player/${channelId}?q=auto&pm=auto`;
   let browser = null;
 
   try {
-    // 1. Vercel ke liye Chromium download/extract karein
     const executablePath = await chromium.executablePath(
       'https://github.com/Sparticuz/chromium/releases/download/v123.0.0/chromium-v123.0.0-pack.tar'
     );
 
-    // ✅ 2. SABSE ZAROORI FIX (libnss3.so error ke liye)
-    // Chromium ko batayein ki uski libraries kahan extract hui hain
+    // ✅ Yeh line libnss3.so error fix karti hai
     process.env.LD_LIBRARY_PATH = path.dirname(executablePath);
 
-    // 3. Browser launch karein
     browser = await puppeteer.launch({
       args: [...chromium.args, '--no-sandbox', '--disable-setuid-sandbox'],
       defaultViewport: chromium.defaultViewport,
@@ -78,7 +73,6 @@ app.get('/play/:id', async (req, res) => {
     const page = await browser.newPage();
     let m3u8Url = null;
 
-    // 4. Player page load hone ka aur m3u8 request ka wait karein
     const m3u8Promise = new Promise((resolve, reject) => {
       page.on('request', (request) => {
         const url = request.url();
@@ -87,34 +81,22 @@ app.get('/play/:id', async (req, res) => {
           resolve(url);
         }
       });
-      // Vercel timeout se pehle error throw karein
-      setTimeout(() => reject(new Error('Timeout: render.m3u8 URL nahi mila')), 25000);
+      setTimeout(() => reject(new Error('Timeout: m3u8 nahi mila')), 25000);
     });
 
     await page.goto(playerUrl, { waitUntil: 'networkidle2', timeout: 30000 });
     const resolvedM3u8Url = await m3u8Promise;
     
-    // Kaam khatam, browser memory free karein
     await browser.close();
     browser = null;
 
-    // 5. M3U8 file fetch karein
     const m3u8Res = await fetch(resolvedM3u8Url, {
-      headers: {
-        'Referer': playerUrl,
-        'Origin': UPSTREAM,
-        'User-Agent': UA,
-        'Accept': '*/*',
-      },
+      headers: { 'Referer': playerUrl, 'Origin': UPSTREAM, 'User-Agent': UA, 'Accept': '*/*' },
     });
 
-    if (!m3u8Res.ok) {
-      throw new Error(`m3u8 fetch failed: ${m3u8Res.status}`);
-    }
-
+    if (!m3u8Res.ok) throw new Error(`m3u8 fetch failed: ${m3u8Res.status}`);
     const m3u8Text = await m3u8Res.text();
 
-    // 6. Playlist rewrite karke frontend ko bhejein
     const proxyHostUrl = `${req.protocol}://${req.get('host')}`;
     const rewritten = rewriteManifest(m3u8Text, resolvedM3u8Url, proxyHostUrl, playerUrl);
 
@@ -129,7 +111,6 @@ app.get('/play/:id', async (req, res) => {
   }
 });
 
-// --- SEGMENT & KEY ROUTE ---
 app.get('/seg', async (req, res) => {
   const targetUrl = req.query.u;
   const refererUrl = req.query.r || (UPSTREAM + '/');
@@ -138,36 +119,24 @@ app.get('/seg', async (req, res) => {
 
   try {
     const upstreamRes = await fetch(targetUrl, {
-      headers: {
-        'Referer': refererUrl,
-        'Origin': UPSTREAM,
-        'User-Agent': UA,
-        'Accept': '*/*',
-      },
+      headers: { 'Referer': refererUrl, 'Origin': UPSTREAM, 'User-Agent': UA, 'Accept': '*/*' },
       redirect: 'follow',
     });
 
-    if (!upstreamRes.ok) {
-      return res.status(upstreamRes.status).send(`Upstream ${upstreamRes.status}`);
-    }
-
+    if (!upstreamRes.ok) return res.status(upstreamRes.status).send(`Upstream ${upstreamRes.status}`);
     const ct = (upstreamRes.headers.get('content-type') || '').toLowerCase();
 
-    // Nested playlists ko bhi rewrite karein
     if (ct.includes('mpegurl') || targetUrl.split('?')[0].endsWith('.m3u8')) {
       const text = await upstreamRes.text();
       const proxyHostUrl = `${req.protocol}://${req.get('host')}`;
       const rewritten = rewriteManifest(text, upstreamRes.url || targetUrl, proxyHostUrl, refererUrl);
-
       res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
       res.setHeader('Cache-Control', 'no-store');
       return res.send(rewritten);
     }
 
-    // Video segments (.ts) aur encryption keys (render.key)
     res.setHeader('Content-Type', ct || 'application/octet-stream');
-    const cl = upstreamRes.headers.get('content-length');
-    if (cl) res.setHeader('Content-Length', cl);
+    if (upstreamRes.headers.get('content-length')) res.setHeader('Content-Length', upstreamRes.headers.get('content-length'));
     res.setHeader('Cache-Control', 'public, max-age=60');
 
     const reader = upstreamRes.body.getReader();
@@ -178,17 +147,12 @@ app.get('/seg', async (req, res) => {
         res.write(value);
       }
     };
-    pump().catch(err => {
-      console.error('[/seg] stream error:', err);
-      res.end();
-    });
+    pump().catch(() => res.end());
+
   } catch (err) {
-    console.error('[/seg] error:', err);
     if (!res.headersSent) res.status(502).send('Segment fetch failed: ' + err.message);
     else res.end();
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`✅ R TV+ running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`✅ R TV+ running on port ${PORT}`));
